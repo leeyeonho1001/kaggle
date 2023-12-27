@@ -1,0 +1,118 @@
+#File uploading
+import pandas as pd
+df = pd.read_csv('hotel_bookings.csv')
+print(df.head())
+
+#Hotel type
+import matplotlib.pyplot as plt
+hotel_type = df['hotel'].value_counts()
+#plot
+plt.figure(figsize=(8, 8))
+plt.pie(hotel_type, labels=hotel_type.index, autopct=lambda p: '{:.1f}%'.format(p))
+plt.title("Hotel Types")
+plt.show()
+
+#Rate of cancellation
+import seaborn as sns
+cancellation_counts = df['is_canceled'].value_counts()
+#plot
+plt.figure(figsize=(8, 6))
+sns.barplot(x=cancellation_counts.index, y=cancellation_counts.values, palette="viridis")
+plt.title("Cancellation Counts")
+plt.xlabel("Cancellation Status")
+plt.ylabel("Count")
+plt.xticks(ticks=[0, 1], labels=['Not Canceled', 'Canceled'])
+plt.show()
+
+#Monthly cancellation rate
+ordered_months = ["January", "February", "March", "April", "May", "June", 
+                  "July", "August", "September", "October", "November", "December"]
+res_book_per_month = df[df['hotel'] == "Resort Hotel"].groupby('arrival_date_month').agg(
+    Bookings=pd.NamedAgg(column='is_canceled', aggfunc='count'),
+    Cancellations=pd.NamedAgg(column='is_canceled', aggfunc='sum')
+).reset_index()
+res_book_per_month['Hotel'] = "Resort Hotel"
+cty_book_per_month = df[df['hotel'] == "City Hotel"].groupby('arrival_date_month').agg(
+    Bookings=pd.NamedAgg(column='is_canceled', aggfunc='count'),
+    Cancellations=pd.NamedAgg(column='is_canceled', aggfunc='sum')
+).reset_index()
+cty_book_per_month['Hotel'] = "City Hotel"
+full_cancel_data = pd.concat([res_book_per_month, cty_book_per_month])
+full_cancel_data['cancel_percent'] = (full_cancel_data['Cancellations'] / full_cancel_data['Bookings']) * 100
+#plot
+plt.figure(figsize=(12, 6))
+sns.barplot(x='arrival_date_month', y='cancel_percent', hue='Hotel', data=full_cancel_data,
+            palette={"City Hotel": "blue", "Resort Hotel": "orange"})
+plt.title("Cancellations per month")
+plt.xlabel("Month")
+plt.ylabel("Cancellations [%]")
+plt.xticks(rotation=45, ha='right')
+plt.legend(title="Hotel", loc="upper right")
+plt.show()
+
+#Type of hotel canceled
+canceled_hoteltype = df[['is_canceled', 'hotel']]
+canceled_hotel = canceled_hoteltype[canceled_hoteltype['is_canceled'] == 1].groupby('hotel').size().reset_index(name='count')
+#plot
+plt.figure(figsize=(8, 6))
+sns.barplot(x='hotel', y='count', data=canceled_hotel, palette='viridis')
+plt.title('Cancellation rates by hotel type')
+plt.xlabel('Hotel Type')
+plt.ylabel('Count')
+for index, value in enumerate(canceled_hotel['count']):
+    plt.text(index, value, str(value), ha='center', va='bottom', fontsize=9)
+plt.show()
+
+#Preprocessing
+df = df.drop(['agent', 'company'], axis=1)
+df = df.dropna()
+df = df[~((df['children'] == 0) & (df['adults'] == 0) & (df['babies'] == 0))]
+df = df[df['adr'] >= 0]
+df = df.select_dtypes(include='number')
+cor_matrix = df.corr()
+plt.figure(figsize=(10, 8))
+sns.heatmap(cor_matrix, annot=True, cmap='coolwarm', fmt='.2f', linewidths=0.5)
+plt.title('Correlation Matrix')
+plt.show()
+useless_col = ['days_in_waiting_list', 'arrival_date_year', 'booking_changes']
+df = df.drop(columns=useless_col)
+
+#Logistic Regression model
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, confusion_matrix, classification_report
+from sklearn.model_selection import train_test_split
+import pandas as pd
+
+X = df.drop(columns=['is_canceled'])
+y = df['is_canceled']
+X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.3, random_state=1)
+
+#Fit model
+lr = LogisticRegression(random_state=1)
+lr.fit(X_train, y_train)
+y_pred_lr = lr.predict(X_test)
+#Evaluate model
+acc_lr = accuracy_score(y_test, y_pred_lr)
+conf = confusion_matrix(y_test, y_pred_lr)
+clf_report = classification_report(y_test, y_pred_lr)
+print(f"Accuracy Score : {acc_lr}")
+print(f"Confusion Matrix:\n{conf}")
+print(f"Classification Report:\n{clf_report}")
+
+#Decision Tree classifier
+import pandas as pd
+from sklearn.tree import DecisionTreeClassifier, export_text
+from sklearn.model_selection import cross_val_score
+from sklearn.metrics import confusion_matrix, accuracy_score
+
+#Fit model
+dtc = DecisionTreeClassifier(random_state=1)
+dtc.fit(X_train, y_train)
+y_pred_dtc = dtc.predict(X_test)
+#Evaluate model
+acc_dtc = accuracy_score(y_test, y_pred_dtc)
+conf = confusion_matrix(y_test, y_pred_dtc)
+clf_report = classification_report(y_test, y_pred_dtc)
+print(f"Accuracy Score : {acc_dtc}")
+print(f"Confusion Matrix : \n{conf}")
+print(f"Classification Report : \n{clf_report}")
