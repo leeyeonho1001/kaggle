@@ -1,0 +1,257 @@
+---
+title: "데마입 기말"
+author: "이연호"
+date: "2025-06-06"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# 데이터 불러오기
+```{r}
+library(readxl)
+
+df <- read_excel("C:/Users/82102/Downloads/defaultofcreditcardclients/default of credit card clients.xls", skip = 1)
+head(df, 20)
+```
+
+
+# 전처리
+```{r}
+credit <- df
+
+credit$SEX <- factor(credit$SEX, labels = c("Male", "Female"))
+
+credit$EDUCATION[credit$EDUCATION %in% c("0", "4", "5", "6")] <- "4"
+credit$EDUCATION <- factor(credit$EDUCATION, labels = c("Graduate School", "University", "High School", "Others"))
+
+credit$MARRIAGE[credit$MARRIAGE == "0"] <- "3"
+credit$MARRIAGE <- factor(credit$MARRIAGE, labels = c("Married", "Single", "Others"))
+
+credit$`default payment next month` <- factor(credit$`default payment next month`, labels = c("No", "Yes"))
+
+library(dplyr)
+
+pay_old <- c("PAY_0", "PAY_2", "PAY_3", "PAY_4", "PAY_5", "PAY_6")
+pay_new <- c("PAY_9", "PAY_8", "PAY_7", "PAY_6", "PAY_5", "PAY_4")
+
+bill_old <- paste0("BILL_AMT", 1:6)
+bill_new <- c("BILL_AMT9", "BILL_AMT8", "BILL_AMT7", "BILL_AMT6", "BILL_AMT5", "BILL_AMT4")
+
+payamt_old <- paste0("PAY_AMT", 1:6)
+payamt_new <- c("PAY_AMT9", "PAY_AMT8", "PAY_AMT7", "PAY_AMT6", "PAY_AMT5", "PAY_AMT4")
+
+credit <- credit %>%
+  rename_with(~ pay_new[match(., pay_old)], all_of(pay_old)) %>%
+  rename_with(~ bill_new[match(., bill_old)], all_of(bill_old)) %>%
+  rename_with(~ payamt_new[match(., payamt_old)], all_of(payamt_old))
+
+pay_vars <- paste0("PAY_", c(4:9))
+
+credit <- credit %>%
+  mutate(across(all_of(pay_vars), ~ {
+    x <- as.character(.)
+    x[x %in% c("-2", "-1")] <- "0"
+    factor(x, levels = as.character(c(0:9)), ordered = TRUE)
+  }))
+
+head(credit, 20)
+```
+
+
+# EDA
+```{r}
+library(ggplot2)
+library(dplyr)
+
+ggplot(credit, aes(x=SEX, fill=`default payment next month`)) +
+  geom_bar(position="fill") + ylab("Proportion") + ggtitle("Default Rate by Sex")
+
+ggplot(credit, aes(x=EDUCATION, fill=`default payment next month`)) +
+  geom_bar(position="fill") + ylab("Proportion") + ggtitle("Default Rate by Education")
+
+ggplot(credit, aes(x=MARRIAGE, fill=`default payment next month`)) +
+  geom_bar(position="fill") + ylab("Proportion") + ggtitle("Default Rate by Marriage")
+
+ggplot(credit, aes(x=AGE, y=as.numeric(`default payment next month` == "Yes"))) +
+  stat_summary(fun=mean, geom="line", color="red", size=0.5) +
+  ylab("Default Payment Rate") +
+  xlab("Age") +
+  ggtitle("Default Payment Rate by Age")
+
+ggplot(credit, aes(x=AGE)) + geom_bar() + ggtitle("Sample count by Age")
+
+credit <- credit %>%
+  mutate(AgeGroup = case_when(
+    AGE < 30 ~ "Under 30",
+    AGE < 40 ~ "30-39",
+    AGE < 50 ~ "40-49",
+    AGE < 60 ~ "50-59",
+    AGE >= 60 ~ "Over 60"
+  ))
+
+credit$AgeGroup <- factor(credit$AgeGroup, levels = c("Under 30", "30-39", "40-49", "50-59", "Over 60"))
+summary(credit$AgeGroup)
+```
+
+
+# train/test set 분리
+```{r}
+set.seed(123)
+train_idx <- sample(seq_len(nrow(credit)), size = 0.7 * nrow(credit))
+train <- credit[train_idx, ]
+test <- credit[-train_idx, ]
+
+summary(credit)
+```
+
+
+# 모델링
+## Logistic regression
+```{r}
+library(caret)
+
+model_logit <- glm(`default payment next month` ~ . - ID - AGE, 
+                   data = train, 
+                   family = binomial)
+
+pred_probs <- predict(model_logit, newdata = test, type = "response")
+pred_class <- factor(ifelse(pred_probs > 0.5, "Yes", "No"), levels = c("No", "Yes"))
+
+actual_class <- test$`default payment next month`
+conf_mat_logit <- confusionMatrix(pred_class, actual_class)
+cat("Logistic Regression Accuracy:", conf_mat_logit$overall["Accuracy"], "\n")
+```
+
+## Decision Tree
+```{r}
+library(rpart)
+library(rpart.plot)
+
+model_dt <- rpart(`default payment next month` ~ . - ID - AGE, 
+                  data = train, 
+                  method = "class")
+
+pred_dt <- predict(model_dt, newdata = test, type = "class")
+conf_mat_dt <- confusionMatrix(pred_dt, test$`default payment next month`)
+cat("Decision Tree Accuracy:", conf_mat_dt$overall["Accuracy"], "\n")
+
+rpart.plot(model_dt, type = 2, extra = 106)
+```
+
+## Neural Network
+```{r}
+library(nnet)
+
+model_nn <- nnet(`default payment next month` ~ . - ID - AGE, 
+                 data = train, 
+                 size = 5, 
+                 trace = FALSE)
+
+pred_prob_nn <- predict(model_nn, newdata = test, type = "raw")
+pred_nn <- factor(ifelse(pred_prob_nn > 0.5, "Yes", "No"), levels = c("No", "Yes"))
+conf_mat_nn <- confusionMatrix(pred_nn, test$`default payment next month`)
+cat("Neural Network Accuracy:", conf_mat_nn$overall["Accuracy"], "\n")
+```
+
+## Random Forest
+```{r}
+library(randomForest)
+
+model_rf <- randomForest(`default payment next month` ~ . - ID - AGE, 
+                         data = train)
+
+pred_rf <- predict(model_rf, newdata = test)
+conf_mat_rf <- confusionMatrix(pred_rf, test$`default payment next month`)
+cat("Random Forest Accuracy:", conf_mat_rf$overall["Accuracy"], "\n")
+```
+
+## Gradient Boosting
+```{r}
+library(gbm)
+set.seed(123)
+
+model_gbm <- gbm(
+  formula = as.numeric(`default payment next month`) - 1 ~ . - ID - AGE,
+  data = train,
+  distribution = "bernoulli",
+  n.trees = 100,
+  verbose = FALSE
+)
+
+pred_prob_gbm <- predict(model_gbm, newdata = test, n.trees = 100, type = "response")
+pred_gbm <- factor(ifelse(pred_prob_gbm > 0.5, "Yes", "No"), levels = levels(test$`default payment next month`))
+conf_mat_gbm <- confusionMatrix(pred_gbm, test$`default payment next month`)
+cat("GBM Accuracy:", conf_mat_gbm$overall["Accuracy"], "\n")
+```
+
+## Bagging
+```{r}
+library(ipred)
+library(caret)
+
+set.seed(123)
+
+model_bagging <- bagging(
+  formula = `default payment next month` ~ . - ID - AGE,
+  data = train,
+  nbagg = 10,
+  coob = FALSE
+)
+
+pred_bagging <- predict(model_bagging, newdata = test, type = "class")
+conf_mat_bagging <- confusionMatrix(pred_bagging, test$`default payment next month`)
+cat("Bagging Accuracy:", conf_mat_bagging$overall["Accuracy"], "\n")
+```
+
+## KNN
+```{r}
+model_knn <- train(`default payment next month` ~ . - ID - AGE,
+                   data = train,
+                   method = "knn",
+                   tuneLength = 1,
+                   trControl = trainControl(method = "none"))
+
+pred_knn <- predict(model_knn, newdata = test)
+conf_mat_knn <- confusionMatrix(pred_knn, test$`default payment next month`)
+cat("KNN Accuracy:", conf_mat_knn$overall["Accuracy"], "\n")
+```
+
+
+## LDA
+```{r}
+library(MASS)
+
+model_lda <- lda(`default payment next month` ~ . - ID - AGE, 
+                 data = train)
+pred_lda <- predict(model_lda, newdata = test)$class
+conf_mat_lda <- confusionMatrix(pred_lda, test$`default payment next month`)
+cat("LDA Accuracy:", conf_mat_lda$overall["Accuracy"], "\n")
+```
+
+
+## QDA
+```{r}
+model_qda <- qda(`default payment next month` ~ . - ID - AGE, 
+                 data = train)
+
+pred_qda <- predict(model_qda, newdata = test)$class
+conf_mat_qda <- confusionMatrix(pred_qda, test$`default payment next month`)
+cat("QDA Accuracy:", conf_mat_qda$overall["Accuracy"], "\n")
+```
+다중공선성 때문에 에러가 발생한다. 
+
+## SVM
+```{r}
+library(e1071)
+
+model_svm <- svm(`default payment next month` ~ . - ID - AGE, 
+                 data = train, 
+                 probability = TRUE)
+
+pred_svm <- predict(model_svm, newdata = test)
+conf_mat_svm <- confusionMatrix(pred_svm, test$`default payment next month`)
+cat("SVM Accuracy:", conf_mat_svm$overall["Accuracy"], "\n")
+```
