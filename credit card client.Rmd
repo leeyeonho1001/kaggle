@@ -1,5 +1,5 @@
 ---
-title: "데마입 기말"
+title: "Credit_card_client"
 author: "이연호"
 date: "2025-06-06"
 output: html_document
